@@ -3,51 +3,54 @@ import numpy as np
 
 
 def haltonRefImpl(i, base, scrambleObject):
-        invFloatBase = 1.0 / float(base)
+    invFloatBase = 1.0 / float(base)
 
-        value = 0.0
-        divisor = invFloatBase
+    value = 0.0
+    divisor = invFloatBase
+
+    if (scrambleObject is not None):
+        scrambleObject.init(i, base)
+
+    while((1.0 - divisor) < 1.0):
+        digit = i % base
 
         if (scrambleObject is not None):
-            scrambleObject.init(i, base)
+            digit = scrambleObject.apply(digit)
 
-        while((1.0 - divisor) < 1.0):
-            digit = i % base
+        value += digit * divisor
 
-            if (scrambleObject is not None):
-                digit = scrambleObject.apply(digit)
+        divisor *= invFloatBase
+        i = (i - digit) // base
 
-            value += digit * divisor
-
-            divisor *= invFloatBase
-            i = (i - digit) // base
-
-        return value
+    return value
 
 
 def haltonOptimized(i, base, scrambleObject):
-        invFloatBase = 1.0 / float(base)
+    """
+    Not yet fully done.
+    """
+    invFloatBase = 1.0 / float(base)
 
-        value = 0.0
-        divisor = invFloatBase
+    value = 0.0
+    divisor = invFloatBase
+
+    if (scrambleObject is not None):
+        scrambleObject.init(i, base)
+
+    while(i != 0):
+        digit = i % base
 
         if (scrambleObject is not None):
-            scrambleObject.init(i, base)
+            valueDigit = scrambleObject.apply(digit)
+        else:
+            valueDigit = digit
 
-        while(i != 0):
-            digit = i % base
+        value += valueDigit * divisor
 
-            if (scrambleObject is not None):
-                valueDigit = scrambleObject.apply(digit)
-            else:
-                valueDigit = digit
+        divisor *= invFloatBase
+        i = i // base
 
-            value += valueDigit * divisor
-
-            divisor *= invFloatBase
-            i = i // base
-
-        return value
+    return value
 
 
 class ScramblePerSample:
@@ -82,13 +85,13 @@ class ScramblePerBase:
         np.random.seed(0)
 
 
-def generateHalton2D(sequenceStart, sequenceStop, base0, base1, scrambleObject0, scrambleObject1, haltonFunc):
+def generateHalton2D(sequenceStart, sequenceStop, sequenceStep, base0, base1, scrambleObject0, scrambleObject1, haltonFunc):
     halton2D = np.vectorize(lambda i: (haltonFunc(i, base0, scrambleObject0), haltonFunc(i, base1, scrambleObject1)))
-    sequence = np.arange(sequenceStart, sequenceStop, 1, dtype=np.uint32)
+    sequence = np.arange(sequenceStart, sequenceStop, sequenceStep, dtype=np.uint32)
     return halton2D(sequence)
 
 
-def plotHalton2D(subplot, start, stop, base0, base1, scrambleClass, haltonFunc):
+def plotHalton2D(subplot, start, stop, base0, base1, scrambleClass, haltonFunc, step=1):
     if scrambleClass is None:
         scramble0 = None
         scramble1 = None
@@ -99,6 +102,7 @@ def plotHalton2D(subplot, start, stop, base0, base1, scrambleClass, haltonFunc):
         scramble1 = scrambleClass(base1)
     sequence = generateHalton2D(start,
                                 stop,
+                                step,
                                 base0,
                                 base1,
                                 scramble0,
@@ -106,6 +110,8 @@ def plotHalton2D(subplot, start, stop, base0, base1, scrambleClass, haltonFunc):
                                 haltonFunc)
     scrambleName = "no scrambling" if scrambleClass is None else scrambleClass.__name__
     subplot.set_title(f"{haltonFunc.__name__} ({base0}, {base1}) - {scrambleName}")
+    subplot.set_xlim([0.0, 1.0])
+    subplot.set_ylim([0.0, 1.0])
     subplot.plot(sequence[0], sequence[1], '.')
     subplot.grid()
 
@@ -137,6 +143,8 @@ def doScrambleStudy(start, stop, base0, base1, base2, base3):
     # complete random data
     rand = generateRandom(start, stop)
     ax[0][0].set_title('Random')
+    ax[0][0].set_xlim([0.0, 1.0])
+    ax[0][0].set_ylim([0.0, 1.0])
     ax[0][0].plot(rand[0], rand[1], 'g.')
     ax[0][0].grid()
 
@@ -158,15 +166,15 @@ def doScrambleStudy(start, stop, base0, base1, base2, base3):
 
 def doImplStudy(start, stop, base0, base1, base2, base3):
     """
-    Shows impact of sequence implementation. Mostly impact of scrambling.
-    Goal is to find an 'easy' GPU version given that random number are not
+    Shows impact of sequence implementation. Mostly impact scrambling.
+    Goal is to find an efficient GPU version given that random number are not
     that easy to get on GPU.
 
     - First test was to get rid of (1.0 - divisor) < 1.0 test. This cause
       iteration to go for a long time but it seems necessary for higher
       precision. Low dimensions do not suffer much though.
 
-    - Further test are needed to optimize scrambling.
+    - Further tests are needed to optimize scrambling.
     """
     # plot each results
     fig, ax = plt.subplots(4, 2, figsize=(15, 12), tight_layout=True)
@@ -176,6 +184,8 @@ def doImplStudy(start, stop, base0, base1, base2, base3):
     # complete random data
     rand = generateRandom(start, stop)
     ax[0][0].set_title('Random')
+    ax[0][0].set_xlim([0.0, 1.0])
+    ax[0][0].set_ylim([0.0, 1.0])
     ax[0][0].plot(rand[0], rand[1], 'g.')
     ax[0][0].grid()
 
@@ -195,22 +205,84 @@ def doImplStudy(start, stop, base0, base1, base2, base3):
 
 def doSequenceStudy(start, stop, base0, base1):
     """
-    Show impact of using sub sequence.
+    Show impact of using sub sequence. Look for colored point distribution.
     """
+    numSequence = 4
+
     # plot each results
-    fig, ax = plt.subplots(3, 1, figsize=(15, 12), tight_layout=True)
+    fig, ax = plt.subplots(4, numSequence, figsize=(15, 12), tight_layout=True)
     fig.suptitle(f"Halton2D sub sequence study - {stop - start} samples")
 
     # halton2D vanilla
-    plotHalton2D(ax[0], start, stop, base0, base1, ScramblePerBase, haltonOptimized)
+    plotHalton2D(ax[0][0], start, stop, base0, base1, ScramblePerBase, haltonOptimized)
 
-    # halton2D - cut sequence in half
-    range = (start + stop) / 8
+    # halton2D - cut sequence
+    seqSize = (start + stop) // numSequence
 
-    while (start < stop):
-        plotHalton2D(ax[1], start, start + range, base0, base1, ScramblePerBase, haltonOptimized)
-        plotHalton2D(ax[2], start, start + range, base0, base1, None, haltonOptimized)
-        start += range
+    # consecutive sub sequence
+    # put everything in 1 graph to see global distribution
+    startCopy = start
+    while (startCopy < stop):
+        plotHalton2D(ax[1][0], startCopy, startCopy + seqSize, base0, base1, ScramblePerBase, haltonOptimized)
+        startCopy += seqSize
+
+    # consecutive sub sequence
+    # put sub sequence in a different plot to see each distribution
+    i = 0
+    startCopy = start
+    while (startCopy < stop):
+        plotHalton2D(ax[2][i], startCopy, startCopy + seqSize, base0, base1, ScramblePerBase, haltonOptimized)
+        startCopy += seqSize
+        i += 1
+
+    # every other numSequence sub sequence
+    for i in range(numSequence):
+        plotHalton2D(ax[3][i], start + i, stop - numSequence + i + 1, base0, base1, ScramblePerBase, haltonOptimized, numSequence)
+
+    # compare distribution
+    plt.savefig("halton2d_sequence_study.png")
+
+
+def doSequenceStartStudy(start, stop, base0, base1):
+    """
+    Show impact of start point on consecutive sequence.
+    """
+    numSequence = 4
+
+    size = stop - start
+    iteration = [(0, 0), (2 * size, 1), (5 * size, 2)]
+
+    # plot each results
+    fig, ax = plt.subplots(5, numSequence, figsize=(15, 12), tight_layout=True)
+    fig.suptitle(f"Halton2D sub sequence start study - {stop - start} samples")
+
+    # halton2D vanilla with start offset
+    for offset, i in iteration:
+        plotHalton2D(ax[0][i], start + offset, stop + offset, base0, base1, ScramblePerBase, haltonOptimized)
+
+    # halton2D - cut sequence
+    seqSize = (start + stop) // numSequence
+
+    # consecutive sub sequence with start offset
+    # put everything in 1 graph to see global distribution
+    for offset, i in iteration:
+        startCopy = start
+        while (startCopy < stop):
+            plotHalton2D(ax[1][i], startCopy + offset, startCopy + seqSize + offset, base0, base1, ScramblePerBase, haltonOptimized)
+            startCopy += seqSize
+
+    # consecutive sub sequence with start offset
+    # put sub sequence in a different plot to see each distribution
+    for offset, j in iteration:
+        i = 0
+        startCopy = start
+        while (startCopy < stop):
+            plotHalton2D(ax[2 + j][i], startCopy + offset, startCopy + seqSize + offset, base0, base1, ScramblePerBase, haltonOptimized)
+            startCopy += seqSize
+            i += 1
+
+    # compare distribution
+    plt.savefig("halton2d_sequence_start_study.png")
 
 
 if __name__ == "__main__":
@@ -229,7 +301,10 @@ if __name__ == "__main__":
     # doImplStudy(start, stop, base0, base1, base2, base3)
     # plt.clf()
 
-    doSequenceStudy(start, stop, base0, base1)
+    # doSequenceStudy(start, stop, base0, base1)
+    # plt.clf()
+
+    doSequenceStartStudy(start, stop, base0, base1)
     # plt.clf()
 
     plt.show()
